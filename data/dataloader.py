@@ -80,8 +80,7 @@ class RawDataset(VisionDataset):
         raw_image = np.fromfile(fpath, dtype=np.float64).reshape(
             (self.image_width, self.image_height)
         )
-        raw_image = torch.from_numpy(raw_image).unsqueeze(0)  # [1, W, H]
-        raw_image = raw_image.repeat(3, 1, 1)  # [3, W, H]
+        raw_image = np.stack([raw_image] * 3, axis=-1)  # [W, H, 3]
         if self.transforms is not None:
             raw_image = self.transforms(raw_image)
         return raw_image
