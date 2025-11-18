@@ -1,5 +1,4 @@
 import os
-from typing import Any
 
 import numpy as np
 import torch
@@ -557,7 +556,7 @@ def get_model_list(dirname, key, iteration=0):
 
 
 # Convert RGB image to Grayscale image
-def rgb_to_gray(img_np: np.ndarray[Any]) -> np.ndarray[Any]:
+def rgb_to_gray(img_np):
     # img_np: [H, W, 3] or [3, H, W]
     if img_np.ndim == 3 and img_np.shape[0] == 3:
         # [3, H, W] → [H, W, 3]
