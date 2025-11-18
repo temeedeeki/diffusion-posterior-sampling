@@ -2,7 +2,6 @@ from collections.abc import Callable
 from glob import glob
 
 import numpy as np
-import torch
 from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision.datasets import VisionDataset
@@ -75,12 +74,12 @@ class RawDataset(VisionDataset):
     def __len__(self) -> int:
         return len(self.fpaths)
 
-    def __getitem__(self, index: int) -> torch.Tensor:
+    def __getitem__(self, index: int):
         fpath = self.fpaths[index]
         raw_image = np.fromfile(fpath, dtype=np.float64).reshape(
             (self.image_width, self.image_height)
         )
-        raw_image = np.stack([raw_image] * 3, axis=-1)  # [W, H, 3]
+        raw_image = np.stack([raw_image] * 3, axis=-1).astype(np.float32)  # [W, H, 3]
         if self.transforms is not None:
             raw_image = self.transforms(raw_image)
         return raw_image
