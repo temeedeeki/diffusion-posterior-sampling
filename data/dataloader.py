@@ -38,7 +38,7 @@ def get_dataloader(
 
 @register_dataset(name="ffhq")
 class FFHQDataset(VisionDataset):
-    def __init__(self, root: str, transforms: Callable | None = None) -> None:
+    def __init__(self, root: str, transforms=None) -> None:
         super().__init__(root, transforms)
 
         self.fpaths = sorted(glob(root + "/**/*.png", recursive=True))
@@ -62,7 +62,7 @@ class RawDataset(VisionDataset):
     def __init__(
         self,
         root: str,
-        transforms: Callable | None = None,
+        transforms=None,
         image_width: int = 128,
         image_height: int = 128,
     ) -> None:
