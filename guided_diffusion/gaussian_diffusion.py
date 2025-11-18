@@ -1,73 +1,79 @@
 import math
 import os
-from functools import partial
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
 from util.img_utils import clear_color
+
 from .posterior_mean_variance import get_mean_processor, get_var_processor
-
-
 
 __SAMPLER__ = {}
 
+
 def register_sampler(name: str):
     def wrapper(cls):
-        if __SAMPLER__.get(name, None):
-            raise NameError(f"Name {name} is already registered!") 
+        if __SAMPLER__.get(name):
+            raise NameError(f"Name {name} is already registered!")
         __SAMPLER__[name] = cls
         return cls
+
     return wrapper
 
 
 def get_sampler(name: str):
-    if __SAMPLER__.get(name, None) is None:
+    if __SAMPLER__.get(name) is None:
         raise NameError(f"Name {name} is not defined!")
     return __SAMPLER__[name]
 
 
-def create_sampler(sampler,
-                   steps,
-                   noise_schedule,
-                   model_mean_type,
-                   model_var_type,
-                   dynamic_threshold,
-                   clip_denoised,
-                   rescale_timesteps,
-                   timestep_respacing=""):
-    
+def create_sampler(
+    sampler,
+    steps,
+    noise_schedule,
+    model_mean_type,
+    model_var_type,
+    dynamic_threshold,
+    clip_denoised,
+    rescale_timesteps,
+    timestep_respacing="",
+):
     sampler = get_sampler(name=sampler)
-    
+
     betas = get_named_beta_schedule(noise_schedule, steps)
     if not timestep_respacing:
         timestep_respacing = [steps]
-         
-    return sampler(use_timesteps=space_timesteps(steps, timestep_respacing),
-                   betas=betas,
-                   model_mean_type=model_mean_type,
-                   model_var_type=model_var_type,
-                   dynamic_threshold=dynamic_threshold,
-                   clip_denoised=clip_denoised, 
-                   rescale_timesteps=rescale_timesteps)
+
+    return sampler(
+        use_timesteps=space_timesteps(steps, timestep_respacing),
+        betas=betas,
+        model_mean_type=model_mean_type,
+        model_var_type=model_var_type,
+        dynamic_threshold=dynamic_threshold,
+        clip_denoised=clip_denoised,
+        rescale_timesteps=rescale_timesteps,
+    )
 
 
 class GaussianDiffusion:
-    def __init__(self,
-                 betas,
-                 model_mean_type,
-                 model_var_type,
-                 dynamic_threshold,
-                 clip_denoised,
-                 rescale_timesteps
-                 ):
-
+    def __init__(
+        self,
+        betas,
+        model_mean_type,
+        model_var_type,
+        dynamic_threshold,
+        clip_denoised,
+        rescale_timesteps,
+    ):
         # use float64 for accuracy.
         betas = np.array(betas, dtype=np.float64)
         self.betas = betas
         assert self.betas.ndim == 1, "betas must be 1-D"
-        assert (0 < self.betas).all() and (self.betas <=1).all(), "betas must be in (0..1]"
+        assert (self.betas > 0).all() and (self.betas <= 1).all(), (
+            "betas must be in (0..1]"
+        )
 
         self.num_timesteps = int(self.betas.shape[0])
         self.rescale_timesteps = rescale_timesteps
@@ -103,23 +109,22 @@ class GaussianDiffusion:
             / (1.0 - self.alphas_cumprod)
         )
 
-        self.mean_processor = get_mean_processor(model_mean_type,
-                                                 betas=betas,
-                                                 dynamic_threshold=dynamic_threshold,
-                                                 clip_denoised=clip_denoised)    
-    
-        self.var_processor = get_var_processor(model_var_type,
-                                               betas=betas)
+        self.mean_processor = get_mean_processor(
+            model_mean_type,
+            betas=betas,
+            dynamic_threshold=dynamic_threshold,
+            clip_denoised=clip_denoised,
+        )
+
+        self.var_processor = get_var_processor(model_var_type, betas=betas)
 
     def q_mean_variance(self, x_start, t):
-        """
-        Get the distribution q(x_t | x_0).
+        """Get the distribution q(x_t | x_0).
 
         :param x_start: the [N x C x ...] tensor of noiseless inputs.
         :param t: the number of diffusion steps (minus 1). Here, 0 means one step.
         :return: A tuple (mean, variance, log_variance), all of x_start's shape.
         """
-        
         mean = extract_and_expand(self.sqrt_alphas_cumprod, t, x_start) * x_start
         variance = extract_and_expand(1.0 - self.alphas_cumprod, t, x_start)
         log_variance = extract_and_expand(self.log_one_minus_alphas_cumprod, t, x_start)
@@ -127,8 +132,7 @@ class GaussianDiffusion:
         return mean, variance, log_variance
 
     def q_sample(self, x_start, t):
-        """
-        Diffuse the data for a given number of diffusion steps.
+        """Diffuse the data for a given number of diffusion steps.
 
         In other words, sample from q(x_t | x_0).
 
@@ -139,17 +143,16 @@ class GaussianDiffusion:
         """
         noise = torch.randn_like(x_start)
         assert noise.shape == x_start.shape
-        
+
         coef1 = extract_and_expand(self.sqrt_alphas_cumprod, t, x_start)
         coef2 = extract_and_expand(self.sqrt_one_minus_alphas_cumprod, t, x_start)
 
         return coef1 * x_start + coef2 * noise
 
     def q_posterior_mean_variance(self, x_start, x_t, t):
-        """
-        Compute the mean and variance of the diffusion posterior:
+        """Compute the mean and variance of the diffusion posterior:
 
-            q(x_{t-1} | x_t, x_0)
+        q(x_{t-1} | x_t, x_0)
 
         """
         assert x_start.shape == x_t.shape
@@ -157,7 +160,9 @@ class GaussianDiffusion:
         coef2 = extract_and_expand(self.posterior_mean_coef2, t, x_t)
         posterior_mean = coef1 * x_start + coef2 * x_t
         posterior_variance = extract_and_expand(self.posterior_variance, t, x_t)
-        posterior_log_variance_clipped = extract_and_expand(self.posterior_log_variance_clipped, t, x_t)
+        posterior_log_variance_clipped = extract_and_expand(
+            self.posterior_log_variance_clipped, t, x_t
+        )
 
         assert (
             posterior_mean.shape[0]
@@ -167,79 +172,86 @@ class GaussianDiffusion:
         )
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_sample_loop(self,
-                      model,
-                      x_start,
-                      measurement,
-                      measurement_cond_fn,
-                      record,
-                      save_root):
-        """
-        The function used for sampling from noise.
-        """ 
+    def p_sample_loop(
+        self, model, x_start, measurement, measurement_cond_fn, record, save_root
+    ):
+        """The function used for sampling from noise."""
         img = x_start
         device = x_start.device
 
         pbar = tqdm(list(range(self.num_timesteps))[::-1])
         for idx in pbar:
             time = torch.tensor([idx] * img.shape[0], device=device)
-            
+
             img = img.requires_grad_()
             out = self.p_sample(x=img, t=time, model=model)
-            
+
             # Give condition.
             noisy_measurement = self.q_sample(measurement, t=time)
 
             # TODO: how can we handle argument for different condition method?
-            img, distance = measurement_cond_fn(x_t=out['sample'],
-                                      measurement=measurement,
-                                      noisy_measurement=noisy_measurement,
-                                      x_prev=img,
-                                      x_0_hat=out['pred_xstart'])
+            img, distance = measurement_cond_fn(
+                x_t=out["sample"],
+                measurement=measurement,
+                noisy_measurement=noisy_measurement,
+                x_prev=img,
+                x_0_hat=out["pred_xstart"],
+            )
             img = img.detach_()
-           
-            pbar.set_postfix({'distance': distance.item()}, refresh=False)
+
+            pbar.set_postfix({"distance": distance.item()}, refresh=False)
             if record:
                 if idx % 10 == 0:
-                    file_path = os.path.join(save_root, f"progress/x_{str(idx).zfill(4)}.png")
+                    file_path = os.path.join(
+                        save_root, f"progress/x_{str(idx).zfill(4)}.png"
+                    )
                     plt.imsave(file_path, clear_color(img))
 
-        return img       
-        
+        return img
+
     def p_sample(self, model, x, t):
         raise NotImplementedError
 
     def p_mean_variance(self, model, x, t):
         model_output = model(x, self._scale_timesteps(t))
-        
+
         # In the case of "learned" variance, model will give twice channels.
         if model_output.shape[1] == 2 * x.shape[1]:
-            model_output, model_var_values = torch.split(model_output, x.shape[1], dim=1)
+            model_output, model_var_values = torch.split(
+                model_output, x.shape[1], dim=1
+            )
         else:
-            # The name of variable is wrong. 
-            # This will just provide shape information, and 
+            # The name of variable is wrong.
+            # This will just provide shape information, and
             # will not be used for calculating something important in variance.
             model_var_values = model_output
 
-        model_mean, pred_xstart = self.mean_processor.get_mean_and_xstart(x, t, model_output)
-        model_variance, model_log_variance = self.var_processor.get_variance(model_var_values, t)
+        model_mean, pred_xstart = self.mean_processor.get_mean_and_xstart(
+            x, t, model_output
+        )
+        model_variance, model_log_variance = self.var_processor.get_variance(
+            model_var_values, t
+        )
 
-        assert model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape
+        assert (
+            model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape
+        )
 
-        return {'mean': model_mean,
-                'variance': model_variance,
-                'log_variance': model_log_variance,
-                'pred_xstart': pred_xstart}
+        return {
+            "mean": model_mean,
+            "variance": model_variance,
+            "log_variance": model_log_variance,
+            "pred_xstart": pred_xstart,
+        }
 
-    
     def _scale_timesteps(self, t):
         if self.rescale_timesteps:
             return t.float() * (1000.0 / self.num_timesteps)
         return t
 
+
 def space_timesteps(num_timesteps, section_counts):
-    """
-    Create a list of timesteps to use from an original diffusion process,
+    """Create a list of timesteps to use from an original diffusion process,
     given the number of timesteps we want to take from equally-sized portions
     of the original process.
     For example, if there's 300 timesteps and the section counts are [10,15,20]
@@ -268,7 +280,7 @@ def space_timesteps(num_timesteps, section_counts):
         section_counts = [int(x) for x in section_counts.split(",")]
     elif isinstance(section_counts, int):
         section_counts = [section_counts]
-    
+
     size_per = num_timesteps // len(section_counts)
     extra = num_timesteps % len(section_counts)
     start_idx = 0
@@ -294,8 +306,7 @@ def space_timesteps(num_timesteps, section_counts):
 
 
 class SpacedDiffusion(GaussianDiffusion):
-    """
-    A diffusion process which can skip steps in a base diffusion process.
+    """A diffusion process which can skip steps in a base diffusion process.
     :param use_timesteps: a collection (sequence or set) of timesteps from the
                           original diffusion process to retain.
     :param kwargs: the kwargs to create the base diffusion process.
@@ -317,14 +328,10 @@ class SpacedDiffusion(GaussianDiffusion):
         kwargs["betas"] = np.array(new_betas)
         super().__init__(**kwargs)
 
-    def p_mean_variance(
-        self, model, *args, **kwargs
-    ):  # pylint: disable=signature-differs
+    def p_mean_variance(self, model, *args, **kwargs):  # pylint: disable=signature-differs
         return super().p_mean_variance(self._wrap_model(model), *args, **kwargs)
 
-    def training_losses(
-        self, model, *args, **kwargs
-    ):  # pylint: disable=signature-differs
+    def training_losses(self, model, *args, **kwargs):  # pylint: disable=signature-differs
         return super().training_losses(self._wrap_model(model), *args, **kwargs)
 
     def condition_mean(self, cond_fn, *args, **kwargs):
@@ -360,26 +367,26 @@ class _WrappedModel:
         return self.model(x, new_ts, **kwargs)
 
 
-@register_sampler(name='ddpm')
+@register_sampler(name="ddpm")
 class DDPM(SpacedDiffusion):
     def p_sample(self, model, x, t):
         out = self.p_mean_variance(model, x, t)
-        sample = out['mean']
+        sample = out["mean"]
 
         noise = torch.randn_like(x)
         if t != 0:  # no noise when t == 0
-            sample += torch.exp(0.5 * out['log_variance']) * noise
+            sample += torch.exp(0.5 * out["log_variance"]) * noise
 
-        return {'sample': sample, 'pred_xstart': out['pred_xstart']}
-    
+        return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
-@register_sampler(name='ddim')
+
+@register_sampler(name="ddim")
 class DDIM(SpacedDiffusion):
     def p_sample(self, model, x, t, eta=0.0):
         out = self.p_mean_variance(model, x, t)
-        
-        eps = self.predict_eps_from_x_start(x, t, out['pred_xstart'])
-        
+
+        eps = self.predict_eps_from_x_start(x, t, out["pred_xstart"])
+
         alpha_bar = extract_and_expand(self.alphas_cumprod, t, x)
         alpha_bar_prev = extract_and_expand(self.alphas_cumprod_prev, t, x)
         sigma = (
@@ -391,13 +398,13 @@ class DDIM(SpacedDiffusion):
         noise = torch.randn_like(x)
         mean_pred = (
             out["pred_xstart"] * torch.sqrt(alpha_bar_prev)
-            + torch.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+            + torch.sqrt(1 - alpha_bar_prev - sigma**2) * eps
         )
 
         sample = mean_pred
         if t != 0:
             sample += sigma * noise
-        
+
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
     def predict_eps_from_x_start(self, x_t, t, pred_xstart):
@@ -410,9 +417,9 @@ class DDIM(SpacedDiffusion):
 # Helper functions
 # =================
 
+
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
-    """
-    Get a pre-defined beta schedule for the given name.
+    """Get a pre-defined beta schedule for the given name.
 
     The beta schedule library consists of beta schedules which remain similar
     in the limit of num_diffusion_timesteps.
@@ -428,18 +435,16 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
         return np.linspace(
             beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
         )
-    elif schedule_name == "cosine":
+    if schedule_name == "cosine":
         return betas_for_alpha_bar(
             num_diffusion_timesteps,
             lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
         )
-    else:
-        raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
+    raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
 
 
 def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
-    """
-    Create a beta schedule that discretizes the given alpha_t_bar function,
+    """Create a beta schedule that discretizes the given alpha_t_bar function,
     which defines the cumulative product of (1-beta) over time from t = [0,1].
 
     :param num_diffusion_timesteps: the number of betas to produce.
@@ -456,9 +461,11 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
         betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
     return np.array(betas)
 
+
 # ================
 # Helper function
 # ================
+
 
 def extract_and_expand(array, time, target):
     array = torch.from_numpy(array).to(target.device)[time].float()
@@ -470,9 +477,9 @@ def extract_and_expand(array, time, target):
 def expand_as(array, target):
     if isinstance(array, np.ndarray):
         array = torch.from_numpy(array)
-    elif isinstance(array, np.float):
+    elif isinstance(array, float):
         array = torch.tensor([array])
-   
+
     while array.ndim < target.ndim:
         array = array.unsqueeze(-1)
 
@@ -480,8 +487,7 @@ def expand_as(array, target):
 
 
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
-    """
-    Extract values from a 1-D numpy array for a batch of indices.
+    """Extract values from a 1-D numpy array for a batch of indices.
 
     :param arr: the 1-D numpy array.
     :param timesteps: a tensor of indices into the array to extract.

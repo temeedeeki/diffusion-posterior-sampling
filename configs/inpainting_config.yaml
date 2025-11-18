@@ -4,7 +4,7 @@ conditioning:
     scale: 0.5
 
 data:
-  name: ffhq
+  name: raw
   root: ./data/samples/
 
 measurement:
@@ -15,8 +15,6 @@ measurement:
     # mask_len_range: !!python/tuple [128, 129]  # for box
     mask_prob_range: !!python/tuple [0.3, 0.7]  # for random
     image_size: 256
-
-
   noise:
     name: gaussian
     sigma: 0.05

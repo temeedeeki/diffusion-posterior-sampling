@@ -1,10 +1,7 @@
-"""
-Copyright (c) Facebook, Inc. and its affiliates.
+"""Copyright (c) Facebook, Inc. and its affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
-
-from typing import List, Optional
 
 import torch
 from packaging import version
@@ -14,16 +11,18 @@ if version.parse(torch.__version__) >= version.parse("1.7.0"):
 
 
 def fft2c_old(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
-    """
-    Apply centered 2 dimensional Fast Fourier Transform.
+    """Apply centered 2 dimensional Fast Fourier Transform.
+
     Args:
         data: Complex valued input data containing at least 3 dimensions:
             dimensions -3 & -2 are spatial dimensions and dimension -1 has size
             2. All other dimensions are assumed to be batch dimensions.
         norm: Whether to include normalization. Must be one of ``"backward"``
             or ``"ortho"``. See ``torch.fft.fft`` on PyTorch 1.9.0 for details.
+
     Returns:
         The FFT of the input.
+
     """
     if not data.shape[-1] == 2:
         raise ValueError("Tensor does not have separate complex dim.")
@@ -39,8 +38,8 @@ def fft2c_old(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
 
 
 def ifft2c_old(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
-    """
-    Apply centered 2-dimensional Inverse Fast Fourier Transform.
+    """Apply centered 2-dimensional Inverse Fast Fourier Transform.
+
     Args:
         data: Complex valued input data containing at least 3 dimensions:
             dimensions -3 & -2 are spatial dimensions and dimension -1 has size
@@ -48,8 +47,10 @@ def ifft2c_old(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
         norm: Whether to include normalization. Must be one of ``"backward"``
             or ``"ortho"``. See ``torch.fft.ifft`` on PyTorch 1.9.0 for
             details.
+
     Returns:
         The IFFT of the input.
+
     """
     if not data.shape[-1] == 2:
         raise ValueError("Tensor does not have separate complex dim.")
@@ -65,15 +66,17 @@ def ifft2c_old(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
 
 
 def fft2c_new(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
-    """
-    Apply centered 2 dimensional Fast Fourier Transform.
+    """Apply centered 2 dimensional Fast Fourier Transform.
+
     Args:
         data: Complex valued input data containing at least 3 dimensions:
             dimensions -3 & -2 are spatial dimensions and dimension -1 has size
             2. All other dimensions are assumed to be batch dimensions.
         norm: Normalization mode. See ``torch.fft.fft``.
+
     Returns:
         The FFT of the input.
+
     """
     if not data.shape[-1] == 2:
         raise ValueError("Tensor does not have separate complex dim.")
@@ -90,15 +93,17 @@ def fft2c_new(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
 
 
 def ifft2c_new(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
-    """
-    Apply centered 2-dimensional Inverse Fast Fourier Transform.
+    """Apply centered 2-dimensional Inverse Fast Fourier Transform.
+
     Args:
         data: Complex valued input data containing at least 3 dimensions:
             dimensions -3 & -2 are spatial dimensions and dimension -1 has size
             2. All other dimensions are assumed to be batch dimensions.
         norm: Normalization mode. See ``torch.fft.ifft``.
+
     Returns:
         The IFFT of the input.
+
     """
     if not data.shape[-1] == 2:
         raise ValueError("Tensor does not have separate complex dim.")
@@ -118,14 +123,16 @@ def ifft2c_new(data: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
 
 
 def roll_one_dim(x: torch.Tensor, shift: int, dim: int) -> torch.Tensor:
-    """
-    Similar to roll but for only one dim.
+    """Similar to roll but for only one dim.
+
     Args:
         x: A PyTorch tensor.
         shift: Amount to roll.
         dim: Which dimension to roll.
+
     Returns:
         Rolled version of x.
+
     """
     shift = shift % x.size(dim)
     if shift == 0:
@@ -139,35 +146,38 @@ def roll_one_dim(x: torch.Tensor, shift: int, dim: int) -> torch.Tensor:
 
 def roll(
     x: torch.Tensor,
-    shift: List[int],
-    dim: List[int],
+    shift: list[int],
+    dim: list[int],
 ) -> torch.Tensor:
-    """
-    Similar to np.roll but applies to PyTorch Tensors.
+    """Similar to np.roll but applies to PyTorch Tensors.
+
     Args:
         x: A PyTorch tensor.
         shift: Amount to roll.
         dim: Which dimension to roll.
+
     Returns:
         Rolled version of x.
+
     """
     if len(shift) != len(dim):
         raise ValueError("len(shift) must match len(dim)")
 
-    for (s, d) in zip(shift, dim):
+    for s, d in zip(shift, dim, strict=False):
         x = roll_one_dim(x, s, d)
 
     return x
 
 
-def fftshift(x: torch.Tensor, dim: Optional[List[int]] = None) -> torch.Tensor:
-    """
-    Similar to np.fft.fftshift but applies to PyTorch Tensors
+def fftshift(x: torch.Tensor, dim: list[int] | None = None) -> torch.Tensor:
+    """Similar to np.fft.fftshift but applies to PyTorch Tensors
     Args:
         x: A PyTorch tensor.
         dim: Which dimension to fftshift.
+
     Returns:
         fftshifted version of x.
+
     """
     if dim is None:
         # this weird code is necessary for toch.jit.script typing
@@ -183,14 +193,15 @@ def fftshift(x: torch.Tensor, dim: Optional[List[int]] = None) -> torch.Tensor:
     return roll(x, shift, dim)
 
 
-def ifftshift(x: torch.Tensor, dim: Optional[List[int]] = None) -> torch.Tensor:
-    """
-    Similar to np.fft.ifftshift but applies to PyTorch Tensors
+def ifftshift(x: torch.Tensor, dim: list[int] | None = None) -> torch.Tensor:
+    """Similar to np.fft.ifftshift but applies to PyTorch Tensors
     Args:
         x: A PyTorch tensor.
         dim: Which dimension to ifftshift.
+
     Returns:
         ifftshifted version of x.
+
     """
     if dim is None:
         # this weird code is necessary for toch.jit.script typing

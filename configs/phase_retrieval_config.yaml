@@ -4,14 +4,13 @@ conditioning:
     scale: 1.0
 
 data:
-  name: ffhq
+  name: raw
   root: ./data/samples/
 
 measurement:
   operator:
     name: phase_retrieval
     oversample: 2.0
-
-  noise: 
+  noise:
     name: gaussian
     sigma: 0.05

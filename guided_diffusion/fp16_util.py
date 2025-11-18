@@ -1,19 +1,15 @@
-"""
-Helpers to train with 16-bit precision.
-"""
+"""Helpers to train with 16-bit precision."""
 
 import numpy as np
 import torch as th
-import torch.nn as nn
+from torch import nn
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 INITIAL_LOG_LOSS_SCALE = 20.0
 
 
 def convert_module_to_f16(l):
-    """
-    Convert primitive modules to float16.
-    """
+    """Convert primitive modules to float16."""
     if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         l.weight.data = l.weight.data.half()
         if l.bias is not None:
@@ -21,9 +17,7 @@ def convert_module_to_f16(l):
 
 
 def convert_module_to_f32(l):
-    """
-    Convert primitive modules to float32, undoing convert_module_to_f16().
-    """
+    """Convert primitive modules to float32, undoing convert_module_to_f16()."""
     if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         l.weight.data = l.weight.data.float()
         if l.bias is not None:
@@ -31,8 +25,7 @@ def convert_module_to_f32(l):
 
 
 def make_master_params(param_groups_and_shapes):
-    """
-    Copy model parameters into a (differently-shaped) list of full-precision
+    """Copy model parameters into a (differently-shaped) list of full-precision
     parameters.
     """
     master_params = []
@@ -48,12 +41,11 @@ def make_master_params(param_groups_and_shapes):
 
 
 def model_grads_to_master_grads(param_groups_and_shapes, master_params):
-    """
-    Copy the gradients from the model parameters into the master parameters
+    """Copy the gradients from the model parameters into the master parameters
     from make_master_params().
     """
     for master_param, (param_group, shape) in zip(
-        master_params, param_groups_and_shapes
+        master_params, param_groups_and_shapes, strict=False
     ):
         master_param.grad = _flatten_dense_tensors(
             [param_grad_or_zeros(param) for (_, param) in param_group]
@@ -61,14 +53,16 @@ def model_grads_to_master_grads(param_groups_and_shapes, master_params):
 
 
 def master_params_to_model_params(param_groups_and_shapes, master_params):
-    """
-    Copy the master parameter data back into the model parameters.
-    """
+    """Copy the master parameter data back into the model parameters."""
     # Without copying to a list, if a generator is passed, this will
     # silently not copy any parameters.
-    for master_param, (param_group, _) in zip(master_params, param_groups_and_shapes):
+    for master_param, (param_group, _) in zip(
+        master_params, param_groups_and_shapes, strict=False
+    ):
         for (_, param), unflat_master_param in zip(
-            param_group, unflatten_master_params(param_group, master_param.view(-1))
+            param_group,
+            unflatten_master_params(param_group, master_param.view(-1)),
+            strict=False,
         ):
             param.detach().copy_(unflat_master_param)
 
@@ -96,10 +90,12 @@ def master_params_to_state_dict(
     if use_fp16:
         state_dict = model.state_dict()
         for master_param, (param_group, _) in zip(
-            master_params, param_groups_and_shapes
+            master_params, param_groups_and_shapes, strict=False
         ):
             for (name, _), unflat_master_param in zip(
-                param_group, unflatten_master_params(param_group, master_param.view(-1))
+                param_group,
+                unflatten_master_params(param_group, master_param.view(-1)),
+                strict=False,
             ):
                 assert name in state_dict
                 state_dict[name] = unflat_master_param
@@ -139,8 +135,7 @@ def zero_grad(model_params):
 def param_grad_or_zeros(param):
     if param.grad is not None:
         return param.grad.data.detach()
-    else:
-        return th.zeros_like(param)
+    return th.zeros_like(param)
 
 
 class MixedPrecisionTrainer:
@@ -173,7 +168,7 @@ class MixedPrecisionTrainer:
 
     def backward(self, loss: th.Tensor):
         if self.use_fp16:
-            loss_scale = 2 ** self.lg_loss_scale
+            loss_scale = 2**self.lg_loss_scale
             (loss * loss_scale).backward()
         else:
             loss.backward()
@@ -181,13 +176,12 @@ class MixedPrecisionTrainer:
     def optimize(self, opt: th.optim.Optimizer):
         if self.use_fp16:
             return self._optimize_fp16(opt)
-        else:
-            return self._optimize_normal(opt)
+        return self._optimize_normal(opt)
 
     def _optimize_fp16(self, opt: th.optim.Optimizer):
         logger.logkv_mean("lg_loss_scale", self.lg_loss_scale)
         model_grads_to_master_grads(self.param_groups_and_shapes, self.master_params)
-        grad_norm, param_norm = self._compute_norms(grad_scale=2 ** self.lg_loss_scale)
+        grad_norm, param_norm = self._compute_norms(grad_scale=2**self.lg_loss_scale)
         if check_overflow(grad_norm):
             self.lg_loss_scale -= 1
             logger.log(f"Found NaN, decreased lg_loss_scale to {self.lg_loss_scale}")
@@ -197,7 +191,7 @@ class MixedPrecisionTrainer:
         logger.logkv_mean("grad_norm", grad_norm)
         logger.logkv_mean("param_norm", param_norm)
 
-        self.master_params[0].grad.mul_(1.0 / (2 ** self.lg_loss_scale))
+        self.master_params[0].grad.mul_(1.0 / (2**self.lg_loss_scale))
         opt.step()
         zero_master_grads(self.master_params)
         master_params_to_model_params(self.param_groups_and_shapes, self.master_params)

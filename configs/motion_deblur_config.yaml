@@ -4,7 +4,7 @@ conditioning:
     scale: 0.3
 
 data:
-  name: ffhq
+  name: raw
   root: ./data/samples/
 
 measurement:
@@ -12,7 +12,6 @@ measurement:
     name: motion_blur
     kernel_size: 61
     intensity: 0.5
-
-  noise: 
+  noise:
     name: gaussian
     sigma: 0.05

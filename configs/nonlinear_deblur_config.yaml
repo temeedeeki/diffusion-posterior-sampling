@@ -4,14 +4,13 @@ conditioning:
     scale: 0.3
 
 data:
-  name: ffhq
+  name: raw
   root: ./data/samples/
 
 measurement:
   operator:
     name: nonlinear_blur
     opt_yml_path: ./bkse/options/generate_blur/default.yml
-
-  noise: 
+  noise:
     name: gaussian
     sigma: 0.05

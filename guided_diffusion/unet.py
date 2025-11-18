@@ -1,57 +1,57 @@
-from abc import abstractmethod
-
+import functools
 import math
+from abc import abstractmethod
 
 import numpy as np
 import torch as th
-import torch.nn as nn
 import torch.nn.functional as F
-import functools
+from torch import nn
 
 from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .nn import (
+    avg_pool_nd,
     checkpoint,
     conv_nd,
     linear,
-    avg_pool_nd,
-    zero_module,
     normalization,
     timestep_embedding,
+    zero_module,
 )
-
 
 NUM_CLASSES = 1000
 
+
 def create_model(
-    image_size,
-    num_channels,
+    image_size: int,
+    num_channels: int,
     num_res_blocks,
     channel_mult="",
-    learn_sigma=False,
-    class_cond=False,
-    use_checkpoint=False,
+    learn_sigma: bool = False,
+    class_cond: bool = False,
+    use_checkpoint: bool = False,
     attention_resolutions="16",
-    num_heads=1,
-    num_head_channels=-1,
-    num_heads_upsample=-1,
-    use_scale_shift_norm=False,
+    num_heads: int = 1,
+    num_head_channels: int = -1,
+    num_heads_upsample: int = -1,
+    use_scale_shift_norm: bool = False,
     dropout=0,
-    resblock_updown=False,
-    use_fp16=False,
-    use_new_attention_order=False,
-    model_path='',
+    resblock_updown: bool = False,
+    use_fp16: bool = False,
+    use_new_attention_order: bool = False,
+    model_path="",
 ):
     if channel_mult == "":
-        if image_size == 512:
+        if image_size == 512:  # noqa: PLR2004
             channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
-        elif image_size == 256:
+        elif image_size == 256:  # noqa: PLR2004
             channel_mult = (1, 1, 2, 2, 4, 4)
-        elif image_size == 128:
+        elif image_size == 128:  # noqa: PLR2004
             channel_mult = (1, 1, 2, 3, 4)
-        elif image_size == 64:
+        elif image_size == 64:  # noqa: PLR2004
             channel_mult = (1, 2, 3, 4)
         else:
-            raise ValueError(f"unsupported image size: {image_size}")
+            value_error_message = f"unsupported image size: {image_size}"
+            raise ValueError(value_error_message)
     else:
         channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
 
@@ -64,7 +64,7 @@ def create_model(
     else:
         raise NotImplementedError
 
-    model= UNetModel(
+    model = UNetModel(
         image_size=image_size,
         in_channels=3,
         model_channels=num_channels,
@@ -85,26 +85,25 @@ def create_model(
     )
 
     try:
-        model.load_state_dict(th.load(model_path, map_location='cpu'))
+        model.load_state_dict(th.load(model_path, map_location="cpu"))
     except Exception as e:
         print(f"Got exception: {e} / Randomly initialize")
     return model
 
+
 class AttentionPool2d(nn.Module):
-    """
-    Adapted from CLIP: https://github.com/openai/CLIP/blob/main/clip/model.py
-    """
+    """Adapted from CLIP: https://github.com/openai/CLIP/blob/main/clip/model.py"""
 
     def __init__(
         self,
         spacial_dim: int,
         embed_dim: int,
         num_heads_channels: int,
-        output_dim: int = None,
-    ):
+        output_dim: int | None = None,
+    ) -> None:
         super().__init__()
         self.positional_embedding = nn.Parameter(
-            th.randn(embed_dim, spacial_dim ** 2 + 1) / embed_dim ** 0.5
+            th.randn(embed_dim, spacial_dim**2 + 1) / embed_dim**0.5
         )
         self.qkv_proj = conv_nd(1, embed_dim, 3 * embed_dim, 1)
         self.c_proj = conv_nd(1, embed_dim, output_dim or embed_dim, 1)
@@ -123,20 +122,15 @@ class AttentionPool2d(nn.Module):
 
 
 class TimestepBlock(nn.Module):
-    """
-    Any module where forward() takes timestep embeddings as a second argument.
-    """
+    """Any module where forward() takes timestep embeddings as a second argument."""
 
     @abstractmethod
     def forward(self, x, emb):
-        """
-        Apply the module to `x` given `emb` timestep embeddings.
-        """
+        """Apply the module to `x` given `emb` timestep embeddings."""
 
 
 class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
-    """
-    A sequential module that passes timestep embeddings to the children that
+    """A sequential module that passes timestep embeddings to the children that
     support it as an extra input.
     """
 
@@ -150,8 +144,7 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
 
 
 class Upsample(nn.Module):
-    """
-    An upsampling layer with an optional convolution.
+    """An upsampling layer with an optional convolution.
 
     :param channels: channels in the inputs and outputs.
     :param use_conv: a bool determining if a convolution is applied.
@@ -182,8 +175,7 @@ class Upsample(nn.Module):
 
 
 class Downsample(nn.Module):
-    """
-    A downsampling layer with an optional convolution.
+    """A downsampling layer with an optional convolution.
 
     :param channels: channels in the inputs and outputs.
     :param use_conv: a bool determining if a convolution is applied.
@@ -212,8 +204,7 @@ class Downsample(nn.Module):
 
 
 class ResBlock(TimestepBlock):
-    """
-    A residual block that can optionally change the number of channels.
+    """A residual block that can optionally change the number of channels.
 
     :param channels: the number of input channels.
     :param emb_channels: the number of timestep embedding channels.
@@ -293,8 +284,7 @@ class ResBlock(TimestepBlock):
             self.skip_connection = conv_nd(dims, channels, self.out_channels, 1)
 
     def forward(self, x, emb):
-        """
-        Apply the block to a Tensor, conditioned on a timestep embedding.
+        """Apply the block to a Tensor, conditioned on a timestep embedding.
 
         :param x: an [N x C x ...] Tensor of features.
         :param emb: an [N x emb_channels] Tensor of timestep embeddings.
@@ -328,8 +318,7 @@ class ResBlock(TimestepBlock):
 
 
 class AttentionBlock(nn.Module):
-    """
-    An attention block that allows spatial positions to attend to each other.
+    """An attention block that allows spatial positions to attend to each other.
 
     Originally ported from here, but adapted to the N-d case.
     https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/models/unet.py#L66.
@@ -348,9 +337,9 @@ class AttentionBlock(nn.Module):
         if num_head_channels == -1:
             self.num_heads = num_heads
         else:
-            assert (
-                channels % num_head_channels == 0
-            ), f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            assert channels % num_head_channels == 0, (
+                f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            )
             self.num_heads = channels // num_head_channels
         self.use_checkpoint = use_checkpoint
         self.norm = normalization(channels)
@@ -377,8 +366,7 @@ class AttentionBlock(nn.Module):
 
 
 def count_flops_attn(model, _x, y):
-    """
-    A counter for the `thop` package to count the operations in an
+    """A counter for the `thop` package to count the operations in an
     attention operation.
     Meant to be used like:
         macs, params = thop.profile(
@@ -392,22 +380,19 @@ def count_flops_attn(model, _x, y):
     # We perform two matmuls with the same number of ops.
     # The first computes the weight matrix, the second computes
     # the combination of the value vectors.
-    matmul_ops = 2 * b * (num_spatial ** 2) * c
+    matmul_ops = 2 * b * (num_spatial**2) * c
     model.total_ops += th.DoubleTensor([matmul_ops])
 
 
 class QKVAttentionLegacy(nn.Module):
-    """
-    A module which performs QKV attention. Matches legacy QKVAttention + input/ouput heads shaping
-    """
+    """A module which performs QKV attention. Matches legacy QKVAttention + input/ouput heads shaping"""
 
     def __init__(self, n_heads):
         super().__init__()
         self.n_heads = n_heads
 
     def forward(self, qkv):
-        """
-        Apply QKV attention.
+        """Apply QKV attention.
 
         :param qkv: an [N x (H * 3 * C) x T] tensor of Qs, Ks, and Vs.
         :return: an [N x (H * C) x T] tensor after attention.
@@ -430,17 +415,14 @@ class QKVAttentionLegacy(nn.Module):
 
 
 class QKVAttention(nn.Module):
-    """
-    A module which performs QKV attention and splits in a different order.
-    """
+    """A module which performs QKV attention and splits in a different order."""
 
     def __init__(self, n_heads):
         super().__init__()
         self.n_heads = n_heads
 
     def forward(self, qkv):
-        """
-        Apply QKV attention.
+        """Apply QKV attention.
 
         :param qkv: an [N x (3 * H * C) x T] tensor of Qs, Ks, and Vs.
         :return: an [N x (H * C) x T] tensor after attention.
@@ -465,8 +447,7 @@ class QKVAttention(nn.Module):
 
 
 class UNetModel(nn.Module):
-    """
-    The full UNet model with attention and timestep embedding.
+    """The full UNet model with attention and timestep embedding.
 
     :param in_channels: channels in the input Tensor.
     :param model_channels: base channel count for the model.
@@ -687,33 +668,28 @@ class UNetModel(nn.Module):
         )
 
     def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
+        """Convert the torso of the model to float16."""
         self.input_blocks.apply(convert_module_to_f16)
         self.middle_block.apply(convert_module_to_f16)
         self.output_blocks.apply(convert_module_to_f16)
 
     def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
+        """Convert the torso of the model to float32."""
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
     def forward(self, x, timesteps, y=None):
-        """
-        Apply the model to an input batch.
+        """Apply the model to an input batch.
 
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        assert (y is not None) == (
-            self.num_classes is not None
-        ), "must specify y if and only if the model is class-conditional"
+        assert (y is not None) == (self.num_classes is not None), (
+            "must specify y if and only if the model is class-conditional"
+        )
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
@@ -735,8 +711,7 @@ class UNetModel(nn.Module):
 
 
 class SuperResModel(UNetModel):
-    """
-    A UNetModel that performs super-resolution.
+    """A UNetModel that performs super-resolution.
 
     Expects an extra kwarg `low_res` to condition on a low-resolution image.
     """
@@ -752,8 +727,7 @@ class SuperResModel(UNetModel):
 
 
 class EncoderUNetModel(nn.Module):
-    """
-    The half UNet model with attention and timestep embedding.
+    """The half UNet model with attention and timestep embedding.
 
     For usage, see UNet.
     """
@@ -926,22 +900,17 @@ class EncoderUNetModel(nn.Module):
             raise NotImplementedError(f"Unexpected {pool} pooling")
 
     def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
-        """
+        """Convert the torso of the model to float16."""
         self.input_blocks.apply(convert_module_to_f16)
         self.middle_block.apply(convert_module_to_f16)
 
     def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
-        """
+        """Convert the torso of the model to float32."""
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
 
     def forward(self, x, timesteps):
-        """
-        Apply the model to an input batch.
+        """Apply the model to an input batch.
 
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
@@ -960,13 +929,14 @@ class EncoderUNetModel(nn.Module):
             results.append(h.type(x.dtype).mean(dim=(2, 3)))
             h = th.cat(results, axis=-1)
             return self.out(h)
-        else:
-            h = h.type(x.dtype)
-            return self.out(h)
+        h = h.type(x.dtype)
+        return self.out(h)
 
 
 class NLayerDiscriminator(nn.Module):
-    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False):
+    def __init__(
+        self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False
+    ):
         super(NLayerDiscriminator, self).__init__()
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
@@ -977,7 +947,7 @@ class NLayerDiscriminator(nn.Module):
         padw = 1
         sequence = [
             nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw),
-            nn.LeakyReLU(0.2, True)
+            nn.LeakyReLU(0.2, True),
         ]
 
         nf_mult = 1
@@ -986,22 +956,36 @@ class NLayerDiscriminator(nn.Module):
             nf_mult_prev = nf_mult
             nf_mult = min(2**n, 8)
             sequence += [
-                nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-                          kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+                nn.Conv2d(
+                    ndf * nf_mult_prev,
+                    ndf * nf_mult,
+                    kernel_size=kw,
+                    stride=2,
+                    padding=padw,
+                    bias=use_bias,
+                ),
                 norm_layer(ndf * nf_mult),
-                nn.LeakyReLU(0.2, True)
+                nn.LeakyReLU(0.2, True),
             ]
 
         nf_mult_prev = nf_mult
         nf_mult = min(2**n_layers, 8)
         sequence += [
-            nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
-                      kernel_size=kw, stride=2, padding=padw, bias=use_bias),
+            nn.Conv2d(
+                ndf * nf_mult_prev,
+                ndf * nf_mult,
+                kernel_size=kw,
+                stride=2,
+                padding=padw,
+                bias=use_bias,
+            ),
             norm_layer(ndf * nf_mult),
-            nn.LeakyReLU(0.2, True)
+            nn.LeakyReLU(0.2, True),
         ]
 
-        sequence += [nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=2, padding=padw)] + [nn.Dropout(0.5)]
+        sequence += [
+            nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=2, padding=padw)
+        ] + [nn.Dropout(0.5)]
         if use_sigmoid:
             sequence += [nn.Sigmoid()]
 
@@ -1019,40 +1003,44 @@ class GANLoss(nn.Module):
     """
 
     def __init__(self, gan_mode, target_real_label=1.0, target_fake_label=0.0):
-        """ Initialize the GANLoss class.
+        """Initialize the GANLoss class.
 
-        Parameters:
+        Parameters
+        ----------
             gan_mode (str) - - the type of GAN objective. It currently supports vanilla, lsgan, and wgangp.
             target_real_label (bool) - - label for a real image
             target_fake_label (bool) - - label of a fake image
 
         Note: Do not use sigmoid as the last layer of Discriminator.
         LSGAN needs no sigmoid. vanilla GANs will handle it with BCEWithLogitsLoss.
+
         """
         super(GANLoss, self).__init__()
-        self.register_buffer('real_label', th.tensor(target_real_label))
-        self.register_buffer('fake_label', th.tensor(target_fake_label))
+        self.register_buffer("real_label", th.tensor(target_real_label))
+        self.register_buffer("fake_label", th.tensor(target_fake_label))
         self.gan_mode = gan_mode
-        if gan_mode == 'lsgan':
+        if gan_mode == "lsgan":
             self.loss = nn.MSELoss()
-        elif gan_mode == 'vanilla':
+        elif gan_mode == "vanilla":
             self.loss = nn.BCEWithLogitsLoss()
-        elif gan_mode in ['wgangp']:
+        elif gan_mode in ["wgangp"]:
             self.loss = None
         else:
-            raise NotImplementedError('gan mode %s not implemented' % gan_mode)
+            raise NotImplementedError("gan mode %s not implemented" % gan_mode)
 
     def get_target_tensor(self, prediction, target_is_real):
         """Create label tensors with the same size as the input.
 
-        Parameters:
+        Parameters
+        ----------
             prediction (tensor) - - tpyically the prediction from a discriminator
             target_is_real (bool) - - if the ground truth label is for real images or fake images
 
-        Returns:
+        Returns
+        -------
             A label tensor filled with ground truth label, and with the size of the input
-        """
 
+        """
         if target_is_real:
             target_tensor = self.real_label
         else:
@@ -1062,17 +1050,20 @@ class GANLoss(nn.Module):
     def __call__(self, prediction, target_is_real):
         """Calculate loss given Discriminator's output and grount truth labels.
 
-        Parameters:
+        Parameters
+        ----------
             prediction (tensor) - - tpyically the prediction output from a discriminator
             target_is_real (bool) - - if the ground truth label is for real images or fake images
 
-        Returns:
+        Returns
+        -------
             the calculated loss.
+
         """
-        if self.gan_mode in ['lsgan', 'vanilla']:
+        if self.gan_mode in ["lsgan", "vanilla"]:
             target_tensor = self.get_target_tensor(prediction, target_is_real)
             loss = self.loss(prediction, target_tensor)
-        elif self.gan_mode == 'wgangp':
+        elif self.gan_mode == "wgangp":
             if target_is_real:
                 loss = -prediction.mean()
             else:
@@ -1080,7 +1071,9 @@ class GANLoss(nn.Module):
         return loss
 
 
-def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', constant=1.0, lambda_gp=10.0):
+def cal_gradient_penalty(
+    netD, real_data, fake_data, device, type="mixed", constant=1.0, lambda_gp=10.0
+):
     """Calculate the gradient penalty loss, used in WGAN-GP paper https://arxiv.org/abs/1704.00028
 
     Arguments:
@@ -1093,25 +1086,40 @@ def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', const
         lambda_gp (float)           -- weight for this loss
 
     Returns the gradient penalty loss
+
     """
     if lambda_gp > 0.0:
-        if type == 'real':   # either use real images, fake images, or a linear interpolation of two.
+        if (
+            type == "real"
+        ):  # either use real images, fake images, or a linear interpolation of two.
             interpolatesv = real_data
-        elif type == 'fake':
+        elif type == "fake":
             interpolatesv = fake_data
-        elif type == 'mixed':
+        elif type == "mixed":
             alpha = th.rand(real_data.shape[0], 1, device=device)
-            alpha = alpha.expand(real_data.shape[0], real_data.nelement() // real_data.shape[0]).contiguous().view(*real_data.shape)
+            alpha = (
+                alpha.expand(
+                    real_data.shape[0], real_data.nelement() // real_data.shape[0]
+                )
+                .contiguous()
+                .view(*real_data.shape)
+            )
             interpolatesv = alpha * real_data + ((1 - alpha) * fake_data)
         else:
-            raise NotImplementedError('{} not implemented'.format(type))
+            raise NotImplementedError(f"{type} not implemented")
         interpolatesv.requires_grad_(True)
         disc_interpolates = netD(interpolatesv)
-        gradients = th.autograd.grad(outputs=disc_interpolates, inputs=interpolatesv,
-                                     grad_outputs=th.ones(disc_interpolates.size()).to(device),
-                                     create_graph=True, retain_graph=True, only_inputs=True)
+        gradients = th.autograd.grad(
+            outputs=disc_interpolates,
+            inputs=interpolatesv,
+            grad_outputs=th.ones(disc_interpolates.size()).to(device),
+            create_graph=True,
+            retain_graph=True,
+            only_inputs=True,
+        )
         gradients = gradients[0].view(real_data.size(0), -1)  # flat the data
-        gradient_penalty = (((gradients + 1e-16).norm(2, dim=1) - constant) ** 2).mean() * lambda_gp        # added eps
+        gradient_penalty = (
+            ((gradients + 1e-16).norm(2, dim=1) - constant) ** 2
+        ).mean() * lambda_gp  # added eps
         return gradient_penalty, gradients
-    else:
-        return 0.0, None
+    return 0.0, None

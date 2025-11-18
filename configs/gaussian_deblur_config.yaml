@@ -4,15 +4,14 @@ conditioning:
     scale: 0.3
 
 data:
-  name: ffhq
+  name: raw
   root: ./data/samples/
 
 measurement:
   operator:
     name: gaussian_blur
-    kernel_size: 61
-    intensity: 3.0
-  
-  noise: 
+    kernel_size: 64
+    intensity: 0.025
+  noise:
     name: gaussian
-    sigma: 0.05
+    sigma: 0.01
