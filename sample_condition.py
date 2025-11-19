@@ -105,13 +105,11 @@ def main() -> None:
         mask_gen = mask_generator(**measure_config["mask_opt"])
 
     # Do Inference
-    for i, ref_img in enumerate(loader):
+    for i, (ref_img, raw_min, raw_max) in enumerate(loader):
         inference_message = f"Inference for image {i}"
         logger.info(inference_message)
         output_file_name = str(i).zfill(3) + ".raw"
         ref_img_device = ref_img.to(device)
-        ref_img_device_min = ref_img_device.min().item()
-        ref_img_device_max = ref_img_device.max().item()
 
         # Exception) In case of inpainting,
         if measure_config["operator"]["name"] == "inpainting" and mask_gen is not None:
@@ -148,9 +146,7 @@ def main() -> None:
         recon_np = (recon_np - recon_np.min()) / (
             recon_np.max() - recon_np.min() + 1e-8
         )
-        recon_np = (
-            recon_np * (ref_img_device_max - ref_img_device_min) + ref_img_device_min
-        )
+        recon_np = recon_np * (raw_max - raw_min) + raw_min
 
         input_np.astype(np.float64).tofile(out_path / "input" / output_file_name)
         label_np.astype(np.float64).tofile(out_path / "label" / output_file_name)

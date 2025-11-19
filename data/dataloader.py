@@ -79,7 +79,9 @@ class RawDataset(VisionDataset):
         raw_image = np.fromfile(fpath, dtype=np.float64).reshape(
             (self.image_width, self.image_height)
         )
-        raw_image = np.stack([raw_image] * 3, axis=-1).astype(np.float32)  # [W, H, 3]
+        raw_min = raw_image.min()
+        raw_max = raw_image.max()
+        raw_image = np.stack([raw_image] * 3, axis=-1).astype(np.float32)
         if self.transforms is not None:
             raw_image = self.transforms(raw_image)
-        return raw_image
+        return raw_image, raw_min, raw_max
