@@ -146,7 +146,7 @@ def main() -> None:
         recon_np = (recon_np - recon_np.min()) / (
             recon_np.max() - recon_np.min() + 1e-8
         )
-        recon_np = recon_np * (raw_max - raw_min) + raw_min
+        recon_np = recon_np * (raw_max.item() - raw_min.item()) + raw_min.item()
 
         input_np.astype(np.float64).tofile(out_path / "input" / output_file_name)
         label_np.astype(np.float64).tofile(out_path / "label" / output_file_name)
